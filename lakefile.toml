@@ -1,0 +1,10 @@
+name = "STLC"
+version = "0.1.0"
+defaultTargets = ["stlc"]
+
+[[lean_lib]]
+name = "STLC"
+
+[[lean_exe]]
+name = "stlc"
+root = "Main"
