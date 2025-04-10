@@ -8,3 +8,7 @@ name = "STLC"
 [[lean_exe]]
 name = "stlc"
 root = "Main"
+
+[[require]]
+name = "mathlib"
+scope = "leanprover-community"

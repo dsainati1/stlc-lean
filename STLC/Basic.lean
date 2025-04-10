@@ -1,4 +1,3 @@
-
 -- de-brujin syntax for the simply typed lambda calculus with numbers, bools and pairs
 
 inductive type : Type where
@@ -34,7 +33,6 @@ inductive term : Type where
   | Snd (e1 : term)
 
 open term
-open List
 
 inductive wt : context -> term -> type -> Prop where
   | T_Var Γ i τ :
@@ -90,12 +88,13 @@ inductive wt : context -> term -> type -> Prop where
   | T_Snd Γ e τ1 τ2 :
     wt Γ e (Mult τ1 τ2) ->
     --------------------------------
-    wt Γ (Snd e) τ1
+    wt Γ (Snd e) τ2
 
 open wt
 
 notation Γ "⊢" e ":" τ => wt Γ e τ
 
+@[simp]
 def up_term (e : term) (below : Nat) : term :=
   match e with
   | Var i => if i < below then Var i else Var (i + 1)
@@ -111,10 +110,14 @@ def up_term (e : term) (below : Nat) : term :=
   | Fst e => Fst (up_term e below)
   | Snd e => Snd (up_term e below)
 
+
+@[simp]
 def subst (e : term) (var : Nat) (e' : term) : term :=
   match e with
-  | Var i => if i == var then e' else e
-  | Abs τ e => Abs τ (subst e (var + 1) (up_term e' 0) )
+  | Var i =>
+    if i == var then e' else
+    if i > var then Var (i - 1) else Var i
+  | Abs τ e => Abs τ (subst e (var + 1) e' )
   | App e1 e2 => App (subst e1 var e') (subst e2 var e')
   | Zro => Zro
   | Succ e => Succ (subst e var e')
@@ -126,7 +129,8 @@ def subst (e : term) (var : Nat) (e' : term) : term :=
   | Fst e => Fst (subst e var e')
   | Snd e => Snd (subst e var e')
 
-notation e "[" e' "]" => subst e 0 e'
+notation e "[" e' " at" k "]" => subst e k e'
+notation e "[" e' "]" => e[e' at 0]
 
 def is_value (e : term) : Prop :=
   match e with
@@ -457,17 +461,292 @@ theorem progress : forall e τ,
       constructor
       trivial
 
-theorem subst_pres_typing : forall Γ e v τ τ',
+theorem weakening : forall Γ Γ' e τ,
+  (Γ' ⊢ e : τ) ->
+  List.IsPrefix Γ' Γ  ->
+  Γ ⊢ e : τ := by
+
+  intro Γ Γ' e τ Hwt Hpre
+  revert Γ
+  induction Hwt with
+  | T_Var Γ'' i τ' HΓ =>
+      intros Γ Hpre
+      let ⟨post, Hpost⟩ := Hpre
+      rw [<-Hpost]
+      constructor
+      rw [<-HΓ]
+      apply List.getElem?_append_left
+      have hsome : Γ''[i]?.isSome = true := by simp [HΓ]
+      rw [isSome_getElem?] at hsome
+      trivial
+  | T_Abs Γ'' τ1 τ2 e' Hwt' IH =>
+    intros Γ Hpre
+    let ⟨post, Hpost⟩ := Hpre
+    rw [<-Hpost]
+    constructor
+    simp [IH]
+  | T_App Γ' τ1 τ2 e1 e2 Hwt1 Hwt2 IH1 IH2 =>
+    intros Γ Hpre
+    let ⟨post, Hpost⟩ := Hpre
+    rw [<-Hpost]
+    constructor
+    . apply IH1
+      simp
+    . apply IH2
+      simp
+  | T_Zero Γ =>
+    intros Γ Hpre
+    constructor
+  | T_Succ Γ' e' Hwt IH =>
+    intros Γ Hpre
+    constructor
+    apply IH
+    trivial
+  | T_IsZero Γ' e' Hwt IH =>
+    intros Γ Hpre
+    constructor
+    apply IH
+    trivial
+  | T_Tru Γ' =>
+    intros Γ Hpre
+    constructor
+  | T_Fls Γ' =>
+    intros Γ Hpre
+    constructor
+  | T_If Γ' e1 e2 e3 τ' Hwt1 Hwt2 Hwt3 IH1 IH2 IH3 =>
+    intros Γ Hpre
+    constructor
+    . apply IH1
+      trivial
+    . apply IH2
+      trivial
+    . apply IH3
+      trivial
+  | T_Pair Γ' e1 e2 τ1 τ2 Hwt1 Hwt2 IH1 IH2 =>
+    intros Γ Hpre
+    constructor
+    . apply IH1
+      trivial
+    . apply IH2
+      trivial
+  | T_Fst Γ' e' τ1 τ2 Hwt IH =>
+    intros Γ Hpre
+    constructor
+    apply IH
+    trivial
+  | T_Snd Γ' e' τ1 τ2 Hwt IH =>
+    intros Γ Hpre
+    constructor
+    apply IH
+    trivial
+
+theorem weaken_empty : forall Γ e τ,
+  ([] ⊢ e : τ) ->
+  Γ ⊢ e : τ := by
+  intros
+  apply weakening
+  all_goals (try trivial)
+  simp
+
+theorem subst_pres_typing : forall Γ Γ' e v τ τ',
+  ((Γ' ++ (τ' :: Γ)) ⊢ e : τ) ->
+  ([] ⊢ v : τ') ->
+  (Γ' ++ Γ) ⊢ (e[v at (List.length Γ')]) : τ := by
+
+  intro Γ Γ' e
+  revert Γ Γ'
+  induction e with
+  | Var i =>
+    intro Γ Γ' v τ τ' Hwt Hvwt
+    simp
+    by_cases (i = List.length Γ')
+    . case pos h =>
+      simp [h]
+      . cases Hwt
+        . case T_Var H =>
+          rw [List.getElem?_append_right] at H
+          . simp [h] at H
+            subst H
+            apply weaken_empty
+            trivial
+          . simp [h]
+    . case neg h =>
+      simp [h]
+      cases Hwt
+      . case T_Var H =>
+        by_cases (List.length Γ' < i)
+        . case pos h2 =>
+          simp [h2]
+          constructor
+          rw [List.getElem?_append_right, List.getElem?_cons] at H
+          rw [<-H]
+          have h3 : ¬(i - List.length Γ' = 0) := by omega
+          simp [h3]
+          rw [List.getElem?_append_right]
+          congr 1
+          all_goals omega
+        . case neg h2 =>
+          simp [h2]
+          constructor
+          rw [List.getElem?_append_left] at H
+          rw [List.getElem?_append_left]
+          trivial
+          omega
+          omega
+  | Abs τ1 e' IH =>
+    intro Γ Γ' v τ τ' Hwt Hvwt
+    simp
+    cases Hwt
+    . case T_Abs τ2 Hewt =>
+      constructor
+      rw [<-List.cons_append] at Hewt
+      specialize IH Γ (τ1 :: Γ') v τ2 τ' Hewt Hvwt
+      simp at IH
+      trivial
+  | App e1 e2 IH1 IH2 | Pair e1 e2 IH1 IH2 =>
+    intro Γ Γ' v τ τ' Hwt Hvwt
+    cases Hwt
+    . simp
+      constructor
+      . apply IH1
+        all_goals trivial
+      . apply IH2
+        all_goals trivial
+  | Zro | Tru | Fls =>
+    intro Γ Γ' v τ τ' Hwt Hvwt
+    simp
+    cases Hwt
+    constructor
+  | Fst e IH | Snd e IH | IsZero e IH | Succ e IH =>
+    intro Γ Γ' v τ τ' Hwt Hvwt
+    simp
+    cases Hwt
+    constructor
+    apply IH
+    all_goals trivial
+  | If e1 e2 e3 IH1 IH2 IH3 =>
+    intro Γ Γ' v τ τ' Hwt Hvwt
+    simp
+    cases Hwt
+    constructor
+    . apply IH1
+      all_goals trivial
+    . apply IH2
+      all_goals trivial
+    . apply IH3
+      all_goals trivial
+
+theorem subst_1_pres_typing : forall Γ e v τ τ',
   ((τ' :: Γ) ⊢ e : τ) ->
   ([] ⊢ v : τ') ->
   Γ ⊢ (e[v]) : τ := by
-  sorry
+
+  intros Γ e v τ τ' Hwt Hvwt
+  have h : Γ = [] ++ Γ := by simp
+  rw [h]
+  apply subst_pres_typing
+  all_goals trivial
 
 theorem preservation : forall e e' τ,
   ([] ⊢ e : τ) ->
   (e >-> e') ->
   [] ⊢ e' : τ := by
-  sorry
+
+  intros e e' τ Hwt Heval
+  revert e'
+  generalize hΓ : [] = Γ
+  rw [hΓ] at Hwt
+  induction Hwt with
+  | T_Var =>
+   intros
+   contradiction
+  | T_Abs =>
+    intros
+    contradiction
+  | T_App Γ' τ1 τ2 e1 e2 Hwt1 Hwt2 IH1 IH2 =>
+    intros e' Heval
+    cases Heval
+    . case E_App1 e1' Heval =>
+      specialize IH1 hΓ e1' Heval
+      constructor
+      all_goals trivial
+    . case E_App2 v Hvalue Heval =>
+      specialize IH2 hΓ v Heval
+      constructor
+      all_goals trivial
+    . case E_AppAbs τ' e' Hvalue =>
+      cases Hwt1
+      . case T_Abs Hwt' =>
+        rw [<-hΓ] at Hwt2
+        apply subst_1_pres_typing
+        all_goals trivial
+  | T_Zero Γ =>
+    intros
+    contradiction
+  | T_Succ Γ' e1 Hwt IH =>
+    intros e' Heval
+    cases Heval
+    . case E_Succ e1' He1 =>
+      specialize IH hΓ e1' He1
+      constructor
+      trivial
+  | T_IsZero Γ' e' Hwt IH =>
+    intros e' Heval
+    cases Heval
+    . case E_IsZero e1' He1 =>
+      specialize IH hΓ e1' He1
+      constructor
+      trivial
+    . case E_IsZeroTrue => constructor
+    . case E_IsZeroFalse => constructor
+  | T_Tru Γ' =>
+    intros
+    contradiction
+  | T_Fls Γ' =>
+    intros
+    contradiction
+  | T_If Γ' e1 e2 e3 τ' Hwt1 Hwt2 Hwt3 IH1 IH2 IH3 =>
+    intros e' Heval
+    cases Heval
+    . case E_If e1' H1 =>
+      specialize IH1 hΓ e1' H1
+      constructor
+      all_goals trivial
+    . case E_IfTrue => trivial
+    . case E_IfFalse => trivial
+  | T_Pair Γ' e1 e2 τ1 τ2 Hwt1 Hwt2 IH1 IH2 =>
+    intros e' Heval
+    cases Heval
+    . case E_Pair1 e1' He1 =>
+      specialize IH1 hΓ e1' He1
+      constructor
+      trivial
+      trivial
+    . case E_Pair2 e2' Hvalue He2 =>
+      specialize IH2 hΓ e2' He2
+      constructor
+      trivial
+      trivial
+  | T_Fst Γ' e' τ1 τ2 Hwt IH =>
+    intros e' Heval
+    cases Heval
+    . case E_Fst e1' He1 =>
+      specialize IH hΓ e1' He1
+      constructor
+      trivial
+    . case E_FstPair =>
+      cases Hwt
+      trivial
+  | T_Snd Γ' e' τ1 τ2 Hwt IH =>
+    intros e' Heval
+    cases Heval
+    . case E_Snd e1' He1 =>
+      specialize IH hΓ e1' He1
+      constructor
+      trivial
+    . case E_SndPair =>
+      cases Hwt
+      trivial
 
 theorem normalizing : forall Γ e τ,
   (Γ ⊢ e : τ) ->
