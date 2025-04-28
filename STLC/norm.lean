@@ -362,18 +362,9 @@ theorem subst_lr_extend Γ γ τ e:
   unfold subst_lr
   unfold extSubst
   intros Hγ Hlr i τ' Hctx
-  match i with
-  | 0 =>
-      simp;
-      sorry
-  | .succ j =>
-      simp at Hctx
-      simp;
-      sorry
+  sorry
 
-
-
-/- theorem fundamental_lemma (Γ : context) (e : term) (τ : type) :
+theorem fundamental_lemma (Γ : context) (e : term) (τ : type) :
   (Γ ⊢ e : τ) ->
   Γ ⊨ e : τ := by
 
